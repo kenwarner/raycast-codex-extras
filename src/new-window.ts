@@ -17,6 +17,7 @@ export default async function main() {
       await openNewMacOSWindow();
       await log("macOS command completed");
       await showHUD("Opened new Codex window");
+      await log("HUD shown");
       return;
     }
 
@@ -93,7 +94,51 @@ async function execFileLogged(file: string, args: string[]) {
   return result;
 }
 
+async function isProcessRunning(processName: string) {
+  await log("process check started", { processName });
+
+  try {
+    await execFileAsync("pgrep", ["-x", processName]);
+    await log("process check completed", { processName, running: true });
+    return true;
+  } catch (error) {
+    const execError = error as Error & { code?: unknown };
+
+    if (execError.code === 1) {
+      await log("process check completed", { processName, running: false });
+      return false;
+    }
+
+    await log(
+      "process check failed; falling back to AppleScript",
+      serializeError(error),
+    );
+    return true;
+  }
+}
+
+async function launchMacOSCodex() {
+  await log("Codex is not running; dispatching app launch");
+
+  const child = spawn("open", ["-a", "Codex"], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.once("error", (error) => {
+    void log("Codex launch dispatch failed", serializeError(error));
+  });
+  child.unref();
+
+  await closeMainWindow({ clearRootSearch: true });
+  await log("Codex app launch dispatched");
+}
+
 async function openNewMacOSWindow() {
+  if (!(await isProcessRunning("Codex"))) {
+    await launchMacOSCodex();
+    return;
+  }
+
   const script = String.raw`
 tell application "System Events"
   if not (exists process "Codex") then
@@ -115,19 +160,7 @@ return "CODEX_STATUS:missing-new-window-item"
   const status = result.stdout.trim();
 
   if (status === "CODEX_STATUS:not-running") {
-    await log("Codex is not running; dispatching app launch");
-
-    const child = spawn("open", ["-a", "Codex"], {
-      detached: true,
-      stdio: "ignore",
-    });
-    child.once("error", (error) => {
-      void log("Codex launch dispatch failed", serializeError(error));
-    });
-    child.unref();
-
-    await closeMainWindow({ clearRootSearch: true });
-    await log("Codex app launch dispatched");
+    await launchMacOSCodex();
     return;
   }
 
