@@ -234,24 +234,6 @@ public static class NativeMethods {
   [DllImport("user32.dll", CharSet = CharSet.Unicode)]
   public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
-  [DllImport("user32.dll")]
-  public static extern IntPtr GetMenu(IntPtr hWnd);
-
-  [DllImport("user32.dll")]
-  public static extern int GetMenuItemCount(IntPtr hMenu);
-
-  [DllImport("user32.dll")]
-  public static extern IntPtr GetSubMenu(IntPtr hMenu, int nPos);
-
-  [DllImport("user32.dll")]
-  public static extern uint GetMenuItemID(IntPtr hMenu, int nPos);
-
-  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-  public static extern int GetMenuString(IntPtr hMenu, uint uIDItem, StringBuilder lpString, int nMaxCount, uint uFlag);
-
-  [DllImport("user32.dll", SetLastError = true)]
-  public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
-
   [StructLayout(LayoutKind.Sequential)]
   public struct INPUT {
     public uint type;
@@ -300,10 +282,6 @@ public static class NativeMethods {
   public const uint KEYEVENTF_KEYUP = 0x0002;
   public const uint WM_KEYDOWN = 0x0100;
   public const uint WM_KEYUP = 0x0101;
-  public const uint WM_COMMAND = 0x0111;
-  public const uint MF_BYPOSITION = 0x0400;
-  public const uint SMTO_ABORTIFHUNG = 0x0002;
-  public const uint MENU_ITEM_NOT_FOUND = 0xFFFFFFFF;
   public const ushort VK_CONTROL = 0x11;
   public const ushort VK_SHIFT = 0x10;
   public const ushort VK_N = 0x4E;
@@ -380,71 +358,6 @@ public static class NativeMethods {
     PostKey(windowHandle, VK_N, true);
     PostKey(windowHandle, VK_SHIFT, true);
     PostKey(windowHandle, VK_CONTROL, true);
-  }
-
-  private static string NormalizeMenuText(string text) {
-    int tabIndex = text.IndexOf('\t');
-    if (tabIndex >= 0) {
-      text = text.Substring(0, tabIndex);
-    }
-
-    return text.Replace("&", "").Trim();
-  }
-
-  private static bool TryFindMenuItemId(IntPtr menuHandle, string wantedText, out uint commandId) {
-    commandId = 0;
-
-    if (menuHandle == IntPtr.Zero) {
-      return false;
-    }
-
-    int itemCount = GetMenuItemCount(menuHandle);
-    for (int index = 0; index < itemCount; index++) {
-      StringBuilder itemText = new StringBuilder(256);
-      GetMenuString(menuHandle, (uint) index, itemText, itemText.Capacity, MF_BYPOSITION);
-
-      uint itemId = GetMenuItemID(menuHandle, index);
-      if (itemId != MENU_ITEM_NOT_FOUND && string.Equals(NormalizeMenuText(itemText.ToString()), wantedText, StringComparison.OrdinalIgnoreCase)) {
-        commandId = itemId;
-        return true;
-      }
-
-      IntPtr submenu = GetSubMenu(menuHandle, index);
-      if (TryFindMenuItemId(submenu, wantedText, out commandId)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  public static bool TriggerMenuItemByText(IntPtr windowHandle, string wantedText) {
-    IntPtr menuHandle = GetMenu(windowHandle);
-    if (menuHandle == IntPtr.Zero) {
-      return false;
-    }
-
-    uint commandId;
-    if (!TryFindMenuItemId(menuHandle, wantedText, out commandId)) {
-      return false;
-    }
-
-    IntPtr messageResult;
-    IntPtr sendResult = SendMessageTimeout(
-      windowHandle,
-      WM_COMMAND,
-      (IntPtr) commandId,
-      IntPtr.Zero,
-      SMTO_ABORTIFHUNG,
-      1000,
-      out messageResult
-    );
-
-    if (sendResult == IntPtr.Zero) {
-      throw new InvalidOperationException("SendMessageTimeout failed for menu command. LastError=" + Marshal.GetLastWin32Error() + ".");
-    }
-
-    return true;
   }
 
   private static T QueryShellService<T>(Guid service, Guid iid) {
@@ -724,8 +637,7 @@ function Get-CodexWindows {
 
     $title = $titleBuilder.ToString()
     $className = $classBuilder.ToString()
-    $processName = (Get-Process -Id $processId -ErrorAction SilentlyContinue).ProcessName
-    $looksLikeCodex = $processName -eq 'Codex' -and $className -eq 'Chrome_WidgetWin_1'
+    $looksLikeCodex = $className -eq 'Chrome_WidgetWin_1'
 
     if ($looksLikeCodex) {
       [void] $windows.Add([pscustomobject] @{
@@ -742,9 +654,9 @@ function Get-CodexWindows {
   return @($windows)
 }
 
-function Wait-ForNewCodexWindow($BeforeHandles, [int] $Attempts = 40) {
+function Wait-ForNewCodexWindow($BeforeHandles, [int] $Attempts = 80) {
   for ($attempt = 0; $attempt -lt $Attempts; $attempt++) {
-    Start-Sleep -Milliseconds 100
+    Start-Sleep -Milliseconds 50
     $windows = Get-CodexWindows
 
     foreach ($window in $windows) {
@@ -776,7 +688,11 @@ function Move-WindowToDesktopId([IntPtr] $WindowHandle, [Guid] $DesktopId, [stri
   }
 }
 
-$codexProcessIds = @(Get-Process -Name Codex -ErrorAction SilentlyContinue | ForEach-Object { [uint32] $_.Id })
+$codexProcessIds = @(
+  Get-Process -Name Codex -ErrorAction SilentlyContinue |
+    Where-Object { $_.ProcessName -ceq 'Codex' } |
+    ForEach-Object { [uint32] $_.Id }
+)
 Write-CodexLog "Codex process ids: $($codexProcessIds -join ', ')"
 
 $osBuild = [int] [System.Environment]::OSVersion.Version.Build
@@ -809,7 +725,7 @@ if ($candidateWindows.Count -gt 0) {
   Write-CodexLog "targeting handle=$($target.Handle) title=$($target.Title)"
   [void] [NativeMethods]::ShowWindow($target.Handle, 9)
   [void] [NativeMethods]::SetForegroundWindow($target.Handle)
-  Start-Sleep -Milliseconds 150
+  Start-Sleep -Milliseconds 75
   [NativeMethods]::SendCtrlShiftN()
   Write-CodexLog 'sent Ctrl+Shift+N with SendInput'
   Write-Output 'CODEX_RAYCAST_STATUS:opened'
@@ -831,18 +747,18 @@ if ($candidateWindows.Count -gt 0) {
     }
 
     $sourceMoved = $true
-    Start-Sleep -Milliseconds 150
+    Start-Sleep -Milliseconds 75
     [void] [NativeMethods]::ShowWindow($source.Handle, 9)
     [void] [NativeMethods]::SetForegroundWindow($source.Handle)
-    Start-Sleep -Milliseconds 150
+    Start-Sleep -Milliseconds 75
     [NativeMethods]::SendCtrlShiftN()
     Write-CodexLog 'sent Ctrl+Shift+N with SendInput after moving source to current desktop'
-    $newWindow = Wait-ForNewCodexWindow $beforeHandles 40
+    $newWindow = Wait-ForNewCodexWindow $beforeHandles 80
 
     if ($null -eq $newWindow) {
       Write-CodexLog "SendInput did not create a detectable window; posting Ctrl+Shift+N to moved source handle=$($source.Handle)"
       [NativeMethods]::PostCtrlShiftN($source.Handle)
-      $newWindow = Wait-ForNewCodexWindow $beforeHandles 20
+      $newWindow = Wait-ForNewCodexWindow $beforeHandles 40
     }
   } finally {
     if ($sourceMoved -and $null -ne $sourceDesktopId -and $sourceDesktopId -ne $currentDesktopId) {
@@ -863,7 +779,7 @@ if ($candidateWindows.Count -gt 0) {
     }
   }
 
-  Start-Sleep -Milliseconds 150
+  Start-Sleep -Milliseconds 75
 
   [void] [NativeMethods]::ShowWindow($newWindow.Handle, 9)
   [void] [NativeMethods]::SetForegroundWindow($newWindow.Handle)
