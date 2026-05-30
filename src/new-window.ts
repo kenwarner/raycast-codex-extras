@@ -94,7 +94,34 @@ async function execFileLogged(file: string, args: string[]) {
 }
 
 async function openNewMacOSWindow() {
-  await execFileLogged("open", ["-n", "-a", "Codex"]);
+  const script = String.raw`
+tell application "System Events"
+  if not (exists process "Codex") then
+    return "CODEX_STATUS:not-running"
+  end if
+
+  tell process "Codex"
+    if exists menu item "New Window" of menu "File" of menu bar 1 then
+      click menu item "New Window" of menu "File" of menu bar 1
+      return "CODEX_STATUS:opened"
+    end if
+  end tell
+end tell
+
+return "CODEX_STATUS:missing-new-window-item"
+`;
+
+  const result = await execFileLogged("osascript", ["-e", script]);
+  const status = result.stdout.trim();
+
+  if (status === "CODEX_STATUS:not-running") {
+    await execFileLogged("open", ["-a", "Codex"]);
+    return;
+  }
+
+  if (status !== "CODEX_STATUS:opened") {
+    throw new Error(`Unable to invoke Codex New Window menu item: ${status}`);
+  }
 }
 
 async function openNewWindowsWindow() {
