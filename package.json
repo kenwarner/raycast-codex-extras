@@ -1,6 +1,7 @@
 {
   "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "codex-extras",
+  "version": "0.1.0",
   "description": "✨ Codex Extras ✨",
   "license": "MIT",
   "scripts": {
