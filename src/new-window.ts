@@ -1,5 +1,5 @@
-import { showHUD } from "@raycast/api";
-import { execFile } from "node:child_process";
+import { closeMainWindow, showHUD } from "@raycast/api";
+import { execFile, spawn } from "node:child_process";
 import { appendFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -115,7 +115,19 @@ return "CODEX_STATUS:missing-new-window-item"
   const status = result.stdout.trim();
 
   if (status === "CODEX_STATUS:not-running") {
-    await execFileLogged("open", ["-a", "Codex"]);
+    await log("Codex is not running; dispatching app launch");
+
+    const child = spawn("open", ["-a", "Codex"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.once("error", (error) => {
+      void log("Codex launch dispatch failed", serializeError(error));
+    });
+    child.unref();
+
+    await closeMainWindow({ clearRootSearch: true });
+    await log("Codex app launch dispatched");
     return;
   }
 
