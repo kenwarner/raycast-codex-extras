@@ -1,5 +1,5 @@
 import { closeMainWindow, showHUD } from "@raycast/api";
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -103,66 +103,43 @@ function powershellEncodedCommand(value: string) {
   return Buffer.from(value, "utf16le").toString("base64");
 }
 
-async function isProcessRunning(processName: string) {
-  await log("process check started", { processName });
-
-  try {
-    await execFileAsync("pgrep", ["-x", processName]);
-    await log("process check completed", { processName, running: true });
-    return true;
-  } catch (error) {
-    const execError = error as Error & { code?: unknown };
-
-    if (execError.code === 1) {
-      await log("process check completed", { processName, running: false });
-      return false;
-    }
-
-    await log(
-      "process check failed; falling back to AppleScript",
-      serializeError(error),
-    );
-    return true;
-  }
-}
+const macOSAppBundleIdentifier = "com.openai.codex";
+const macOSProcessNames = ["ChatGPT", "Codex"] as const;
 
 async function launchMacOSCodex() {
-  await log("Codex is not running; dispatching app launch");
+  await log("Codex is not running; dispatching app launch", {
+    bundleIdentifier: macOSAppBundleIdentifier,
+  });
 
-  const child = spawn("open", ["-a", "Codex"], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.once("error", (error) => {
-    void log("Codex launch dispatch failed", serializeError(error));
-  });
-  child.unref();
+  // The Codex app is now distributed as ChatGPT.app, but it retains the
+  // com.openai.codex bundle identifier. Launching by bundle identifier keeps
+  // this working across the old and new display names.
+  await execFileLogged("open", ["-b", macOSAppBundleIdentifier]);
 
   await closeMainWindow({ clearRootSearch: true });
-  await log("Codex app launch dispatched");
+  await log("Codex app launch completed");
 }
 
 async function openNewMacOSWindow() {
-  if (!(await isProcessRunning("Codex"))) {
-    await launchMacOSCodex();
-    return;
-  }
-
+  const processNames = macOSProcessNames
+    .map((processName) => JSON.stringify(processName))
+    .join(", ");
   const script = String.raw`
 tell application "System Events"
-  if not (exists process "Codex") then
-    return "CODEX_STATUS:not-running"
-  end if
-
-  tell process "Codex"
-    if exists menu item "New Window" of menu "File" of menu bar 1 then
-      click menu item "New Window" of menu "File" of menu bar 1
-      return "CODEX_STATUS:opened"
+  repeat with processName in {${processNames}}
+    if exists process processName then
+      tell process processName
+        if exists menu item "New Window" of menu "File" of menu bar 1 then
+          click menu item "New Window" of menu "File" of menu bar 1
+          return "CODEX_STATUS:opened:" & processName
+        end if
+      end tell
+      return "CODEX_STATUS:missing-new-window-item:" & processName
     end if
-  end tell
+  end repeat
 end tell
 
-return "CODEX_STATUS:missing-new-window-item"
+return "CODEX_STATUS:not-running"
 `;
 
   const result = await execFileLogged("osascript", ["-e", script]);
@@ -173,9 +150,13 @@ return "CODEX_STATUS:missing-new-window-item"
     return;
   }
 
-  if (status !== "CODEX_STATUS:opened") {
+  if (!status.startsWith("CODEX_STATUS:opened:")) {
     throw new Error(`Unable to invoke Codex New Window menu item: ${status}`);
   }
+
+  await log("macOS New Window menu item invoked", {
+    processName: status.slice("CODEX_STATUS:opened:".length),
+  });
 }
 
 async function openNewWindowsWindow() {

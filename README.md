@@ -8,13 +8,13 @@ Raycast commands that make the Codex desktop app quicker to use.
 
 Opens a new Codex window from Raycast.
 
-- On macOS, the command opens Codex if it is not already running. If Codex is running, it invokes the app's **New Window** menu item.
+- On macOS, the command supports both the current ChatGPT-hosted Codex app and the legacy standalone Codex app. It opens the app if it is not already running; otherwise, it invokes the app's **New Window** menu item, including when existing windows are on another Space.
 - On Windows, the command opens Codex if it is not already running. If Codex is running, it focuses a Codex window and sends the new-window shortcut.
 
 ## Requirements
 
 - Raycast
-- Codex desktop app installed
+- ChatGPT desktop app with Codex (or the legacy standalone Codex app) installed
 - macOS or Windows
 
 ## Permissions
@@ -38,7 +38,7 @@ If the command fails, it writes diagnostic logs to:
 
 Common things to check:
 
-- Codex is installed and can be opened normally.
+- ChatGPT with Codex (or the legacy Codex app) is installed and can be opened normally.
 - Raycast has the required macOS Accessibility permission.
 - On Windows, Codex is installed as the expected desktop app package.
 
