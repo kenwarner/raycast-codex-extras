@@ -669,12 +669,15 @@ function Move-WindowToDesktopId([IntPtr] $WindowHandle, [Guid] $DesktopId, [stri
   }
 }
 
-$codexProcessIds = @(
-  Get-Process -Name Codex -ErrorAction SilentlyContinue |
-    Where-Object { $_.ProcessName -ceq 'Codex' } |
-    ForEach-Object { [uint32] $_.Id }
+$codexProcessNames = @('ChatGPT', 'Codex')
+$codexProcesses = @(
+  foreach ($processName in $codexProcessNames) {
+    Get-Process -Name $processName -ErrorAction SilentlyContinue |
+      Where-Object { $_.ProcessName -ceq $processName }
+  }
 )
-Write-CodexLog "Codex process ids: $($codexProcessIds -join ', ')"
+$codexProcessIds = @($codexProcesses | ForEach-Object { [uint32] $_.Id })
+Write-CodexLog "Codex host processes: $(($codexProcesses | ForEach-Object { "$($_.ProcessName) ($($_.Id))" }) -join ', ')"
 
 $osBuild = [int] [System.Environment]::OSVersion.Version.Build
 Write-CodexLog "OS build: $osBuild"
@@ -769,6 +772,8 @@ if ($candidateWindows.Count -gt 0) {
 } else {
   if ($codexProcessIds.Count -eq 0) {
     Write-CodexLog 'Codex is not running; launching app'
+    # The Codex app is now displayed as ChatGPT and runs as ChatGPT.exe, but
+    # it retains the OpenAI.Codex package identity used by the standalone app.
     Start-Process 'shell:AppsFolder\OpenAI.Codex_2p2nqsd0c76g0!App'
     Write-Output 'CODEX_RAYCAST_STATUS:opened'
   } else {
